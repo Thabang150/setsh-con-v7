@@ -12,10 +12,13 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import Input from '../../components/common/Input';
+import AddressInput from '../../components/common/AddressInput';
 import Button from '../../components/common/Button';
 import CategoryPicker from '../../components/reports/CategoryPicker';
+import DuplicateReportModal from '../../components/reports/DuplicateReportModal';
 import { useLocation } from '../../hooks/useLocation';
 import reportService from '../../services/reportService';
+import { findDuplicateReports } from '../../utils/validation';
 
 const CreateReportScreen = ({ navigation }) => {
   const [formData, setFormData] = useState({
@@ -25,7 +28,10 @@ const CreateReportScreen = ({ navigation }) => {
     photo_url: '',
   });
   const [loading, setLoading] = useState(false);
+  const [checkingDuplicates, setCheckingDuplicates] = useState(false);
   const [locationData, setLocationData] = useState(null);
+  const [duplicateReports, setDuplicateReports] = useState([]);
+  const [showDuplicateModal, setShowDuplicateModal] = useState(false);
   const { getCurrentLocation, reverseGeocode } = useLocation();
 
   useEffect(() => {
@@ -52,6 +58,18 @@ const CreateReportScreen = ({ navigation }) => {
         ]
       );
     }
+  };
+
+  const handleAddressChange = (address) => {
+    setLocationData(prev => prev ? { ...prev, address } : { address });
+  };
+
+  const handleLocationChange = (location) => {
+    setLocationData(prev => ({
+      ...prev,
+      lat: location.latitude,
+      lng: location.longitude,
+    }));
   };
 
   const updateFormData = (field, value) => {
@@ -157,9 +175,59 @@ const CreateReportScreen = ({ navigation }) => {
     return true;
   };
 
+  const checkForDuplicates = async () => {
+    if (!locationData || !formData.category) {
+      return false; // No duplicates if no location or category
+    }
+
+    try {
+      setCheckingDuplicates(true);
+      
+      // Fetch nearby reports
+      const nearbyReports = await reportService.getReports({
+        limit: 50,
+        // Note: Backend would need to support lat/lng filtering
+        // For now, we'll filter on the frontend
+      });
+
+      const duplicates = findDuplicateReports(
+        nearbyReports.reports,
+        {
+          lat: locationData.lat,
+          lng: locationData.lng,
+          category: formData.category,
+        },
+        100 // 100 meter radius
+      );
+
+      if (duplicates.length > 0) {
+        setDuplicateReports(duplicates);
+        setShowDuplicateModal(true);
+        return true;
+      }
+
+      return false;
+    } catch (error) {
+      console.error('Error checking for duplicates:', error);
+      return false; // Continue with submission if check fails
+    } finally {
+      setCheckingDuplicates(false);
+    }
+  };
+
   const handleSubmit = async () => {
     if (!validateForm()) return;
 
+    // Check for duplicate reports first
+    const hasDuplicates = await checkForDuplicates();
+    if (hasDuplicates) {
+      return; // Show duplicate modal, don't submit yet
+    }
+
+    await submitReport();
+  };
+
+  const submitReport = async () => {
     try {
       setLoading(true);
 
@@ -185,6 +253,21 @@ const CreateReportScreen = ({ navigation }) => {
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleUpvoteExisting = async (reportId) => {
+    try {
+      await reportService.upvoteReport(reportId);
+      setShowDuplicateModal(false);
+      navigation.goBack();
+    } catch (error) {
+      throw error;
+    }
+  };
+
+  const handleSubmitNew = () => {
+    setShowDuplicateModal(false);
+    submitReport();
   };
 
   return (
@@ -222,15 +305,13 @@ const CreateReportScreen = ({ navigation }) => {
           onSelectCategory={(category) => updateFormData('category', category)}
         />
 
-        <View style={styles.locationContainer}>
-          <Text style={styles.label}>Location</Text>
-          <View style={styles.locationInfo}>
-            <Ionicons name="location-outline" size={20} color="#2196F3" />
-            <Text style={styles.locationText}>
-              {locationData ? locationData.address : 'Getting location...'}
-            </Text>
-          </View>
-        </View>
+        <AddressInput
+          label="Location"
+          value={locationData?.address || ''}
+          onAddressChange={handleAddressChange}
+          onLocationChange={handleLocationChange}
+          placeholder="Enter address or use current location"
+        />
 
         <View style={styles.photoContainer}>
           <Text style={styles.label}>Photo (Optional)</Text>
@@ -252,11 +333,20 @@ const CreateReportScreen = ({ navigation }) => {
         <Button
           title="Submit Report"
           onPress={handleSubmit}
-          loading={loading}
+          loading={loading || checkingDuplicates}
           disabled={!locationData}
           style={styles.submitButton}
         />
       </ScrollView>
+
+      <DuplicateReportModal
+        visible={showDuplicateModal}
+        onClose={() => setShowDuplicateModal(false)}
+        duplicateReports={duplicateReports}
+        onUpvoteExisting={handleUpvoteExisting}
+        onSubmitNew={handleSubmitNew}
+        loading={loading}
+      />
     </SafeAreaView>
   );
 };
@@ -295,24 +385,6 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: '#333',
     marginBottom: 12,
-  },
-  locationContainer: {
-    marginBottom: 16,
-  },
-  locationInfo: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    padding: 16,
-    backgroundColor: '#f8f9fa',
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: '#ddd',
-  },
-  locationText: {
-    marginLeft: 8,
-    fontSize: 14,
-    color: '#333',
-    flex: 1,
   },
   photoContainer: {
     marginBottom: 24,

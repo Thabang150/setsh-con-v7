@@ -10,8 +10,11 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Input from '../../components/common/Input';
+import AddressInput from '../../components/common/AddressInput';
+import PasswordInput from '../../components/common/PasswordInput';
 import Button from '../../components/common/Button';
 import { useAuth } from '../../hooks/useAuth';
+import { validatePassword } from '../../utils/validation';
 
 const SignupScreen = ({ navigation }) => {
   const [formData, setFormData] = useState({
@@ -20,12 +23,23 @@ const SignupScreen = ({ navigation }) => {
     password: '',
     confirmPassword: '',
     homeAddress: '',
+    lat: null,
+    lng: null,
   });
   const [loading, setLoading] = useState(false);
   const { signUp } = useAuth();
 
   const updateFormData = (field, value) => {
     setFormData(prev => ({ ...prev, [field]: value }));
+  };
+
+  const handleAddressChange = (address) => {
+    updateFormData('homeAddress', address);
+  };
+
+  const handleLocationChange = (location) => {
+    updateFormData('lat', location.latitude);
+    updateFormData('lng', location.longitude);
   };
 
   const validateForm = () => {
@@ -46,8 +60,9 @@ const SignupScreen = ({ navigation }) => {
       return false;
     }
 
-    if (password.length < 6) {
-      Alert.alert('Error', 'Password must be at least 6 characters long');
+    const passwordValidation = validatePassword(password);
+    if (!passwordValidation.isValid) {
+      Alert.alert('Error', 'Please ensure your password meets all requirements');
       return false;
     }
 
@@ -71,6 +86,8 @@ const SignupScreen = ({ navigation }) => {
         password: formData.password,
         role: 'citizen',
         home_address: formData.homeAddress.trim() || undefined,
+        lat: formData.lat,
+        lng: formData.lng,
       };
 
       await signUp(userData);
@@ -121,12 +138,12 @@ const SignupScreen = ({ navigation }) => {
               autoCapitalize="none"
             />
 
-            <Input
+            <PasswordInput
               label="Password"
               value={formData.password}
               onChangeText={(value) => updateFormData('password', value)}
               placeholder="Create a password"
-              secureTextEntry
+              showRequirements={true}
             />
 
             <Input
@@ -135,15 +152,15 @@ const SignupScreen = ({ navigation }) => {
               onChangeText={(value) => updateFormData('confirmPassword', value)}
               placeholder="Confirm your password"
               secureTextEntry
+              error={formData.confirmPassword && formData.password !== formData.confirmPassword ? 'Passwords do not match' : null}
             />
 
-            <Input
+            <AddressInput
               label="Home Address (Optional)"
               value={formData.homeAddress}
-              onChangeText={(value) => updateFormData('homeAddress', value)}
-              placeholder="Enter your home address"
-              multiline
-              numberOfLines={2}
+              onAddressChange={handleAddressChange}
+              onLocationChange={handleLocationChange}
+              placeholder="Enter your home address or use current location"
             />
 
             <Button
